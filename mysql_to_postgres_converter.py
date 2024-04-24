@@ -4,14 +4,14 @@ def convert_sql(input_file_path, output_file_path):
     input_file_path = input_file_path.strip('"')
     output_file_path = output_file_path.strip('"')
     
-    with open(input_file_path, 'r', encoding='utf-8') as file:
-        lines = file.readlines()
-    
     enums = {}
     comments = []
     alter_table_statements = []
     
-    with open(output_file_path, 'w', encoding='utf-8') as file:
+    with open(input_file_path, 'r', encoding='utf-8') as input_file:
+        lines = input_file.readlines()
+
+    with open(output_file_path, 'w', encoding='utf-8') as output_file:
         in_create_table = False
         table_name = ""
 
@@ -61,25 +61,25 @@ def convert_sql(input_file_path, output_file_path):
             if create_table_match:
                 in_create_table = True
                 table_name = create_table_match.group(1)
-                file.write(line)
+                output_file.write(line)
                 continue
 
             # Ensure there is a comma at the end of each line, except for the last line before closing parenthesis
             if in_create_table and line.strip().endswith(')'):
-                file.write(line)
+                output_file.write(line)
             else:
-                file.write(f"{line.rstrip()[:-1]},\n")
+                output_file.write(f"{line.rstrip()[:-1]},\n")
 
             if in_create_table and line.strip().startswith(');'):
                 in_create_table = False
                 # Write comments for each column
                 for comment in comments:
                     comment_statement = f"COMMENT ON COLUMN \"{comment[0]}\".\"{comment[1]}\" IS '{comment[2]}';\n"
-                    file.write(comment_statement)
+                    output_file.write(comment_statement)
                 comments = []  # Reset comments list for the next table
                 # Write ALTER TABLE statements for adding primary keys and unique constraints
                 for alter_statement in alter_table_statements:
-                    file.write(alter_statement)
+                    output_file.write(alter_statement)
                 alter_table_statements = []  # Reset ALTER TABLE statements list for the next table
                 continue
 
@@ -96,10 +96,10 @@ def convert_sql(input_file_path, output_file_path):
                     alter_table_statements.append(f"ALTER TABLE \"{table_name}\" ADD CONSTRAINT \"{constraint_name}\" UNIQUE ({', '.join(columns)});\n")
                 continue
 
-    # Write ENUM definitions at the end of the file
-    for enum_name, values in enums.items():
-        enum_statement = f"CREATE TYPE {enum_name} AS ENUM ({values});\n"
-        file.write(enum_statement)
+        # Write ENUM definitions at the end of the file
+        for enum_name, values in enums.items():
+            enum_statement = f"CREATE TYPE {enum_name} AS ENUM ({values});\n"
+            output_file.write(enum_statement)
 
 if __name__ == '__main__':
     input_path = input('Enter the path to the input SQL file: ')
