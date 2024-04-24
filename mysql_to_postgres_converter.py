@@ -9,6 +9,7 @@ def convert_sql(input_file_path, output_file_path):
     
     enums = {}
     comments = []
+    alter_table_statements = []
     
     with open(output_file_path, 'w', encoding='utf-8') as file:
         in_create_table = False
@@ -37,7 +38,7 @@ def convert_sql(input_file_path, output_file_path):
             line = re.sub(r"current_timestamp\(\)", "current_timestamp", line)
 
             # Capture ENUM-like patterns
-            enum_match = re.search(r"(\w+)\s+boolean\s+NOT NULL\s+'([^']+)'", line)
+            enum_match = re.search(r'"(\w+)"\s+boolean\s+NOT NULL\s+''\s*(\w+)\s*''\s*', line)
             if enum_match:
                 column_name = enum_match.group(1)
                 enum_values = enum_match.group(2)
@@ -53,6 +54,9 @@ def convert_sql(input_file_path, output_file_path):
                 column_name = line.split()[0].strip('"')  # Assuming column name is the first word
                 comments.append((table_name, column_name, comment_text))
 
+            # Remove the "KEY" keyword from UNIQUE KEY statements
+            line = line.replace('UNIQUE KEY', 'UNIQUE')
+
             create_table_match = re.match(r"CREATE TABLE \"(\w+)\" \(", line)
             if create_table_match:
                 in_create_table = True
@@ -60,25 +64,42 @@ def convert_sql(input_file_path, output_file_path):
                 file.write(line)
                 continue
 
-            if in_create_table and line.strip().endswith(','):
-                line = line.rstrip(',') + '\n'
+            # Ensure there is a comma at the end of each line, except for the last line before closing parenthesis
+            if in_create_table and line.strip().endswith(')'):
+                file.write(line)
+            else:
+                file.write(f"{line.rstrip()[:-1]},\n")
 
             if in_create_table and line.strip().startswith(');'):
                 in_create_table = False
-                file.write(line)
                 # Write comments for each column
                 for comment in comments:
                     comment_statement = f"COMMENT ON COLUMN \"{comment[0]}\".\"{comment[1]}\" IS '{comment[2]}';\n"
                     file.write(comment_statement)
                 comments = []  # Reset comments list for the next table
+                # Write ALTER TABLE statements for adding primary keys and unique constraints
+                for alter_statement in alter_table_statements:
+                    file.write(alter_statement)
+                alter_table_statements = []  # Reset ALTER TABLE statements list for the next table
                 continue
 
-            file.write(line)
+            # Handle ALTER TABLE statements for adding primary keys and unique constraints
+            alter_match = re.match(r"ALTER TABLE \"(\w+)\".*ADD\s+(PRIMARY KEY|UNIQUE)\s+\((.*)\)", line)
+            if alter_match:
+                table_name = alter_match.group(1)
+                constraint_type = alter_match.group(2)
+                columns = alter_match.group(3).split(',')
+                constraint_name = f"{table_name}_{''.join(columns).replace('\"', '').replace(' ', '_')}"
+                if constraint_type == 'PRIMARY KEY':
+                    alter_table_statements.append(f"ALTER TABLE \"{table_name}\" ADD CONSTRAINT \"{constraint_name}\" PRIMARY KEY ({', '.join(columns)});\n")
+                elif constraint_type == 'UNIQUE':
+                    alter_table_statements.append(f"ALTER TABLE \"{table_name}\" ADD CONSTRAINT \"{constraint_name}\" UNIQUE ({', '.join(columns)});\n")
+                continue
 
-        # Write ENUM definitions at the end of the file
-        for enum_name, values in enums.items():
-            enum_statement = f"CREATE TYPE {enum_name} AS ENUM ({values});\n"
-            file.write(enum_statement)
+    # Write ENUM definitions at the end of the file
+    for enum_name, values in enums.items():
+        enum_statement = f"CREATE TYPE {enum_name} AS ENUM ({values});\n"
+        file.write(enum_statement)
 
 if __name__ == '__main__':
     input_path = input('Enter the path to the input SQL file: ')
